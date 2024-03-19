@@ -121,6 +121,7 @@ def main():
             logging.error(message)
             print(message)
             break
+        time.sleep(RETRY_PERIOD)
 
 
 if __name__ == '__main__':
