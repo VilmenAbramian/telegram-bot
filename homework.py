@@ -4,6 +4,7 @@ import os
 import requests
 import telegram
 import time
+import sys
 
 
 load_dotenv()  # Загружаем секретные данные В пространство переменных
@@ -25,7 +26,7 @@ HOMEWORK_VERDICTS = {
 }
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.ERROR,
     filename='log.log',
     filemode='w',
     format='%(asctime)s, %(levelname)s, %(message)s'
@@ -36,13 +37,13 @@ def check_tokens():
     """Проверка наличия необходимых для работа бота токенов."""
     if not PRACTICUM_TOKEN:
         logging.critical('Отсутствует токен сервиса Практикум.Домашка!')
-        raise KeyError('Отсутствует токен сервиса Практикум.Домашка!')
+        sys.exit('Отсутствует токен сервиса Практикум.Домашка!')
     if not TELEGRAM_TOKEN:
         logging.critical('Отсутствует токен сервиса Telegram')
-        raise KeyError('Отсутствует токен сервиса Telegram!')
+        sys.exit('Отсутствует токен сервиса Telegram')
     if not TELEGRAM_CHAT_ID:
         logging.critical('Отсутствует ID чата')
-        raise KeyError('Отсутствует ID чата')
+        sys.exit('Отсутствует ID чата')
 
 
 def send_message(bot, message):
@@ -77,7 +78,7 @@ def check_response(response):
 
 
 def parse_status(homework):
-    """Извлечение данных о последней."""
+    """Извлечение данных о последней домашней работе."""
     if 'homework_name' in homework:
         homework_name = homework['homework_name']
     else:
@@ -100,28 +101,25 @@ def main():
     """Основная логика работы бота."""
     check_tokens()
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
-    timestamp = {'from_date': 0}
+    timestamp = int(time.time())
 
     while True:
         try:
             homework_statuses = get_api_answer(timestamp)
             check_response(homework_statuses)
-            # pprint(homework_statuses['homeworks'])
-            if len(homework_statuses['homeworks']) > 1:
-                send_message(
-                    bot, parse_status(homework_statuses['homeworks'][0])
-                )
+            homeworks = homework_statuses.get('homeworks')
+            if homeworks:
+                message = parse_status(homeworks[0])
+                send_message(bot, message)
             timestamp['from_date'] = (
                 homework_statuses['current_date'] + RETRY_PERIOD
             )
-            time.sleep(RETRY_PERIOD)
-
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
-            logging.error(message)
-            print(message)
-            break
-        time.sleep(RETRY_PERIOD)
+            logging.error(message, exc_info=True)
+            send_message(bot, message)
+        finally:
+            time.sleep(RETRY_PERIOD)
 
 
 if __name__ == '__main__':
