@@ -39,17 +39,18 @@ ERROR_CODE = ('Ошибка статус-кода ответа от Практи
               'Параметры запроса: url={url},'
               'headers={headers}, params={params}')
 ERROR_MESSAGE = ('В ответе обнаружено сообщение об ошибке: {message}'
-                 'по ключу: {key} с параметрами: {params}')
+                 'по ключу: {key} с url: {url},'
+                 'headers: {headers} и временем: {params}')
 ERROR_TYPE = ('Неправильный тип ответа ({response_type})'
               'от Практикум.Домашка!')
-ABSENCE_HW = 'В ответе нет списка домашних работ!'
-ERROR_HOMEWORK_TYPE = 'Список домашних работ неверного типа: {type_hw}!'
+ABSENCE_HOMEWORK = 'В ответе нет списка домашних работ!'
+ERROR_HOMEWORK_TYPE = 'Список домашних работ неверного типа: {type_homework}!'
 ERROR_API_KEY = ('В ответе API Практикум.Домашки'
                  'нет ключа `homework_name`')
 ERROR_API_STATUS = 'В ответе Практикум.Домашки не указан статус задания'
 ERROR_STATUS = ('В ответе Практикум.Домашки указан'
                 'неизвестный статус задания: {status}')
-CHANGE_STATUS = 'Изменился статус проверки работы "{hw_name}". {verdict}'
+CHANGE_STATUS = 'Изменился статус проверки работы "{homework_name}". {verdict}'
 FAILURE = 'Сбой в работе программы: {error}'
 
 TOKENS = ('PRACTICUM_TOKEN', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID')
@@ -71,8 +72,11 @@ def send_message(bot, message):
 
 def get_api_answer(time):
     """Запрос к API Практикум.Домашки."""
-    timestamp = {'from_date': time}
-    request_params = dict(url=ENDPOINT, headers=HEADERS, params=timestamp)
+    request_params = dict(
+        url=ENDPOINT,
+        headers=HEADERS,
+        params={'from_date': time}
+    )
     try:
         response = requests.get(**request_params)
     except requests.RequestException as error:
@@ -92,7 +96,7 @@ def get_api_answer(time):
             raise RuntimeError(ERROR_MESSAGE.format(
                 message=response_dict.get(key),
                 key=key,
-                params=(request_params)
+                **request_params
             )
             )
     return response_dict
@@ -105,11 +109,11 @@ def check_response(response):
             response_type=type(response)))
         )
     if 'homeworks' not in response:
-        raise KeyError(ABSENCE_HW)
+        raise KeyError(ABSENCE_HOMEWORK)
     homeworks = response['homeworks']
     if not isinstance(homeworks, list):
         raise TypeError(ERROR_HOMEWORK_TYPE.format(
-            type_hw=type(homeworks))
+            type_homework=type(homeworks))
         )
 
 
@@ -124,7 +128,7 @@ def parse_status(homework):
     if status not in HOMEWORK_VERDICTS:
         raise ValueError((ERROR_STATUS.format(status=status)))
     return CHANGE_STATUS.format(
-        hw_name=name,
+        homework_name=name,
         verdict=HOMEWORK_VERDICTS[status]
     )
 
@@ -134,22 +138,20 @@ def main():
     check_tokens()
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     bot_time = int(time.time())
+    old_message = ''
 
     while True:
-        old_message = ''
         try:
             statuses = get_api_answer(bot_time)
             check_response(statuses)
             homeworks = statuses.get('homeworks')
             if homeworks:
-                message = parse_status(homeworks[0])
-                send_message(bot, message)
+                send_message(bot, parse_status(homeworks[0]))
             bot_time = (
                 statuses.get('current_date', bot_time)
             )
         except telegram.error.TelegramError as telegram_error:
-            message = FAILURE.format(error=telegram_error)
-            logging.exception(message)
+            logging.exception(FAILURE.format(error=telegram_error))
         except Exception as error:
             message = FAILURE.format(error=error)
             logging.exception(message)
