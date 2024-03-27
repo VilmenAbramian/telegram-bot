@@ -1,6 +1,7 @@
 from contextlib import suppress
 import logging
 import os
+import sys
 import time
 
 from dotenv import load_dotenv
@@ -37,7 +38,7 @@ ERROR_CODE = ('Ошибка статус-кода ответа от Практи
               'Код ответа={code}'
               'Параметры запроса: url={url},'
               'headers={headers}, params={params}')
-ERROR_MESSAGE = ('В ответе обнаружено сообщение об ошибке: {msg}'
+ERROR_MESSAGE = ('В ответе обнаружено сообщение об ошибке: {message}'
                  'по ключу: {key} с параметрами: {params}')
 ERROR_TYPE = ('Неправильный тип ответа ({response_type})'
               'от Практикум.Домашка!')
@@ -56,12 +57,9 @@ TOKENS = ('PRACTICUM_TOKEN', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID')
 
 def check_tokens():
     """Проверка наличия необходимых для работа бота токенов."""
-    fail_tokens = []
-    for name in TOKENS:
-        if not globals()[name]:
-            logging.critical(ABSENCE.format(name=name))
-            fail_tokens.append(name)
+    fail_tokens = [name for name in TOKENS if not globals()[name]]
     if fail_tokens:
+        logging.critical(ABSENCE.format(name=fail_tokens))
         raise NameError(ABSENCE.format(name=fail_tokens))
 
 
@@ -71,8 +69,9 @@ def send_message(bot, message):
     logging.debug(MESSAGE_DONE.format(message=message))
 
 
-def get_api_answer(timestamp):
+def get_api_answer(time):
     """Запрос к API Практикум.Домашки."""
+    timestamp = {'from_date': time}
     request_params = dict(url=ENDPOINT, headers=HEADERS, params=timestamp)
     try:
         response = requests.get(**request_params)
@@ -91,9 +90,9 @@ def get_api_answer(timestamp):
     for key in ('code', 'error'):
         if response_dict.get(key):
             raise RuntimeError(ERROR_MESSAGE.format(
-                msg=response_dict.get(key),
+                message=response_dict.get(key),
                 key=key,
-                params=(ENDPOINT, HEADERS, timestamp)
+                params=(request_params)
             )
             )
     return response_dict
@@ -118,14 +117,14 @@ def parse_status(homework):
     """Извлечение данных о последней домашней работе."""
     if 'homework_name' not in homework:
         raise KeyError(ERROR_API_KEY)
-    homework_name = homework['homework_name']
+    name = homework['homework_name']
     if 'status' not in homework:
         raise KeyError(ERROR_API_STATUS)
     status = homework['status']
     if status not in HOMEWORK_VERDICTS:
         raise ValueError((ERROR_STATUS.format(status=status)))
     return CHANGE_STATUS.format(
-        hw_name=homework_name,
+        hw_name=name,
         verdict=HOMEWORK_VERDICTS[status]
     )
 
@@ -134,18 +133,19 @@ def main():
     """Основная логика работы бота."""
     check_tokens()
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
-    timestamp = {'from_date': int(time.time())}
+    bot_time = int(time.time())
 
     while True:
+        old_message = ''
         try:
-            statuses = get_api_answer(timestamp)
+            statuses = get_api_answer(bot_time)
             check_response(statuses)
             homeworks = statuses.get('homeworks')
             if homeworks:
                 message = parse_status(homeworks[0])
                 send_message(bot, message)
-            timestamp['from_date'] = (
-                statuses.get('current_date', timestamp['from_date'])
+            bot_time = (
+                statuses.get('current_date', bot_time)
             )
         except telegram.error.TelegramError as telegram_error:
             message = FAILURE.format(error=telegram_error)
@@ -153,11 +153,10 @@ def main():
         except Exception as error:
             message = FAILURE.format(error=error)
             logging.exception(message)
-            old_msg = ''
             with suppress(telegram.error.TelegramError):
-                if old_msg != message:
+                if old_message != message:
                     send_message(bot, message)
-                    old_msg = message
+                    old_message = message
         finally:
             time.sleep(RETRY_PERIOD)
 
@@ -167,8 +166,8 @@ if __name__ == '__main__':
         level=logging.DEBUG,
         format='%(asctime)s, %(levelname)s, %(funcName)s, %(message)s',
         handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler('logfile.log')
+            logging.StreamHandler(stream=sys.stdout),
+            logging.FileHandler(__file__ + '.log')
         ]
     )
     main()
