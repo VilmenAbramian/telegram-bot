@@ -27,22 +27,22 @@ HOMEWORK_VERDICTS = {
 }
 
 
-ABSENCE = 'Внимание! Отсутствует {name}'
-MSG_DONE = 'Сообщение: "{message}", - успешно отправлено пользователю'
+ABSENCE = 'Внимание! Отсутствует (-ют) {name}'
+MESSAGE_DONE = 'Сообщение: "{message}", - успешно отправлено пользователю'
 ERROR_API = ('Ошибка запроса к API Практикум.Домашки'
              '{error}'
              'Параметры запроса: url={url},'
-             'headers={headers}, params={timestamp}')
+             'headers={headers}, params={params}')
 ERROR_CODE = ('Ошибка статус-кода ответа от Практикум.Домашки'
               'Код ответа={code}'
               'Параметры запроса: url={url},'
-              'headers={headers}, params={timestamp}')
-ERROR_MSG = ('В ответе обнаружено сообщение об ошибке: {msg}'
-             'по ключу: {key} с параметрами: {params}')
+              'headers={headers}, params={params}')
+ERROR_MESSAGE = ('В ответе обнаружено сообщение об ошибке: {msg}'
+                 'по ключу: {key} с параметрами: {params}')
 ERROR_TYPE = ('Неправильный тип ответа ({response_type})'
               'от Практикум.Домашка!')
 ABSENCE_HW = 'В ответе нет списка домашних работ!'
-ERROR_HW_TYPE = 'Список домашних работ неверного типа: {type_hw}!'
+ERROR_HOMEWORK_TYPE = 'Список домашних работ неверного типа: {type_hw}!'
 ERROR_API_KEY = ('В ответе API Практикум.Домашки'
                  'нет ключа `homework_name`')
 ERROR_API_STATUS = 'В ответе Практикум.Домашки не указан статус задания'
@@ -56,48 +56,41 @@ TOKENS = ('PRACTICUM_TOKEN', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID')
 
 def check_tokens():
     """Проверка наличия необходимых для работа бота токенов."""
-    flag = 0
+    fail_tokens = []
     for name in TOKENS:
         if not globals()[name]:
             logging.critical(ABSENCE.format(name=name))
-            flag += 1
-    if flag > 0:
-        raise NameError(ABSENCE.format(name=name))
+            fail_tokens.append(name)
+    if fail_tokens:
+        raise NameError(ABSENCE.format(name=fail_tokens))
 
 
 def send_message(bot, message):
     """Отправка сообщений пользователю."""
     bot.send_message(TELEGRAM_CHAT_ID, message)
-    logging.debug(MSG_DONE.format(message=message))
+    logging.debug(MESSAGE_DONE.format(message=message))
 
 
 def get_api_answer(timestamp):
     """Запрос к API Практикум.Домашки."""
-    timestamp = {'from_date': timestamp}
+    request_params = dict(url=ENDPOINT, headers=HEADERS, params=timestamp)
     try:
-        response = requests.get(
-            url=ENDPOINT, headers=HEADERS, params=timestamp
-        )
+        response = requests.get(**request_params)
     except requests.RequestException as error:
         raise ConnectionError(
-            ERROR_API.format(error=error,
-                             url=ENDPOINT,
-                             headers=HEADERS,
-                             timestamp=timestamp)
+            ERROR_API.format(error=error, **request_params)
         )
     if response.status_code != 200:
-        raise ConnectionError(
+        raise RuntimeError(
             ERROR_CODE.format(
                 code=response.status_code,
-                url=ENDPOINT,
-                headers=HEADERS,
-                timestamp=timestamp
+                **request_params
             )
         )
     response_dict = response.json()
     for key in ('code', 'error'):
         if response_dict.get(key):
-            raise ConnectionError(ERROR_MSG.format(
+            raise RuntimeError(ERROR_MESSAGE.format(
                 msg=response_dict.get(key),
                 key=key,
                 params=(ENDPOINT, HEADERS, timestamp)
@@ -116,27 +109,24 @@ def check_response(response):
         raise KeyError(ABSENCE_HW)
     homeworks = response['homeworks']
     if not isinstance(homeworks, list):
-        raise TypeError(ERROR_HW_TYPE.format(
+        raise TypeError(ERROR_HOMEWORK_TYPE.format(
             type_hw=type(homeworks))
         )
 
 
 def parse_status(homework):
     """Извлечение данных о последней домашней работе."""
-    if 'homework_name' in homework:
-        homework_name = homework['homework_name']
-    else:
+    if 'homework_name' not in homework:
         raise KeyError(ERROR_API_KEY)
+    homework_name = homework['homework_name']
     if 'status' not in homework:
         raise KeyError(ERROR_API_STATUS)
-    homework_status = homework['status']
-    if homework_status not in HOMEWORK_VERDICTS:
-        raise ValueError(
-            (ERROR_STATUS.format(status=homework_status))
-        )
+    status = homework['status']
+    if status not in HOMEWORK_VERDICTS:
+        raise ValueError((ERROR_STATUS.format(status=status)))
     return CHANGE_STATUS.format(
         hw_name=homework_name,
-        verdict=HOMEWORK_VERDICTS[homework_status]
+        verdict=HOMEWORK_VERDICTS[status]
     )
 
 
@@ -144,18 +134,18 @@ def main():
     """Основная логика работы бота."""
     check_tokens()
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
-    timestamp = int(time.time())
+    timestamp = {'from_date': int(time.time())}
 
     while True:
         try:
-            homework_statuses = get_api_answer(timestamp)
-            check_response(homework_statuses)
-            homeworks = homework_statuses.get('homeworks')
+            statuses = get_api_answer(timestamp)
+            check_response(statuses)
+            homeworks = statuses.get('homeworks')
             if homeworks:
                 message = parse_status(homeworks[0])
                 send_message(bot, message)
             timestamp['from_date'] = (
-                homework_statuses.get('current_date', timestamp['from_date'])
+                statuses.get('current_date', timestamp['from_date'])
             )
         except telegram.error.TelegramError as telegram_error:
             message = FAILURE.format(error=telegram_error)
@@ -163,28 +153,22 @@ def main():
         except Exception as error:
             message = FAILURE.format(error=error)
             logging.exception(message)
+            old_msg = ''
             with suppress(telegram.error.TelegramError):
-                old_msg = ''
                 if old_msg != message:
                     send_message(bot, message)
-                old_msg = message
+                    old_msg = message
         finally:
             time.sleep(RETRY_PERIOD)
 
 
 if __name__ == '__main__':
-    logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
-
-    handler1 = logging.StreamHandler()
-    handler2 = logging.FileHandler('logfile.log')
-
-    formatter = logging.Formatter(
-        "%(asctime)s, %(levelname)s, %(funcName)s, %(message)s"
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s, %(levelname)s, %(funcName)s, %(message)s',
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler('logfile.log')
+        ]
     )
-    handler1.setFormatter(formatter)
-    handler2.setFormatter(formatter)
-
-    logger.addHandler(handler1)
-    logger.addHandler(handler2)
     main()
