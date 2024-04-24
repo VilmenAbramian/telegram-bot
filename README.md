@@ -84,8 +84,10 @@ TELEGRAM_CHAT_ID = 'your_telegram_chat_token'
 Программа принудительно остановлена.
 ```
 Примеры сообщений:
+
 <img width="448" alt="Снимок экрана 2024-04-24 в 14 28 36" src="https://github.com/VilmenAbramian/telegram-bot/assets/58857991/6e562775-99b9-4f33-8b18-fb67e3fdc544">
 <img width="482" alt="Снимок экрана 2024-04-24 в 14 28 54" src="https://github.com/VilmenAbramian/telegram-bot/assets/58857991/64887d53-6e47-4aee-a57b-3d15ee9469e0">
 
 Проект-12
+
 ![GitHub top language](https://img.shields.io/github/languages/top/VilmenAbramian/telegram-bot)
